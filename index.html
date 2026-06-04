@@ -44,6 +44,55 @@
         --tc-content-padding: 0;
       }
     </style>
+
+    <!-- TEMP debug instrumentation. Remove once the Android pagination issue is
+         diagnosed. Set DEBUG=false to silence without deleting. Patches fetch
+         BEFORE the widget bundle loads so every /v1/paris request is visible in
+         the console (eruda on device), and reports whether .tc-content actually
+         scrolls and emits scroll events — i.e. whether loadMore can ever fire. -->
+    <script>
+      (function tcDebug() {
+        var DEBUG = true;
+        if (!DEBUG) return;
+        var t0 = Date.now();
+        function ts() { return ((Date.now() - t0) / 1000).toFixed(2) + "s"; }
+        var origFetch = window.fetch;
+        window.fetch = function (input, init) {
+          var url = typeof input === "string" ? input : input && input.url;
+          var watch = url && url.indexOf("/v1/paris") !== -1;
+          if (watch) console.log("[TC fetch ->]", ts(), (init && init.method) || "GET", url);
+          return origFetch.apply(this, arguments).then(function (res) {
+            if (watch) console.log("[TC fetch <-]", ts(), res.status, res.type, url);
+            return res;
+          }).catch(function (err) {
+            if (watch) console.log("[TC fetch x]", ts(), String(err), url);
+            throw err;
+          });
+        };
+        // Once the widget has mounted its scroll container, report its geometry
+        // and log scroll activity so we can see if the user can reach the bottom.
+        var tries = 0;
+        var iv = setInterval(function () {
+          var c = document.querySelector(".tc-content");
+          if (c) {
+            clearInterval(iv);
+            console.log("[TC content]", "clientH=", c.clientHeight, "scrollH=", c.scrollHeight,
+              "scrollable=", c.scrollHeight > c.clientHeight,
+              "viewportStableH=", window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.viewportStableHeight);
+            var last = -1;
+            c.addEventListener("scroll", function () {
+              if (Math.abs(c.scrollTop - last) < 40) return;
+              last = c.scrollTop;
+              console.log("[TC scroll]", "top=", Math.round(c.scrollTop),
+                "fromBottom=", Math.round(c.scrollHeight - c.scrollTop - c.clientHeight));
+            }, { passive: true });
+          } else if (++tries > 100) {
+            clearInterval(iv);
+            console.log("[TC content] .tc-content never appeared");
+          }
+        }, 200);
+      })();
+    </script>
   </head>
   <body>
     <div id="toncast-widget"></div>
