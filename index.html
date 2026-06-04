@@ -8,9 +8,11 @@
     <style>
       /* Minimal shell: fill viewport; widget is the only flex child and grows. */
       html {
-        height: 100%;
-        min-height: 100vh;
-        min-height: 100dvh;
+        /* In Telegram's Android WebView 100vh/100dvh are unreliable (they don't
+           match the actually-visible WebView, especially in fullscreen). Drive
+           the layout height from tg.viewportStableHeight via --tg-viewport-height
+           instead; fall back to 100dvh for plain web where dvh is accurate. */
+        height: var(--tg-viewport-height, 100dvh);
         color-scheme: dark;
         background: #0f172a;
         /* Prevent the WebView itself from bouncing/elastic-scrolling when the
@@ -21,7 +23,7 @@
       body {
         margin: 0;
         box-sizing: border-box;
-        height: 100%;
+        height: var(--tg-viewport-height, 100dvh);
         overflow: hidden;
         overscroll-behavior: none;
         padding:
@@ -52,6 +54,14 @@
       (function initToncastTelegramHost() {
         var tg = window.Telegram && window.Telegram.WebApp;
         if (!tg) return;
+        function applyViewportHeight() {
+          // viewportStableHeight = visible WebView height excluding the keyboard;
+          // it is correct on Android where 100vh/100dvh are not. Mirror it into a
+          // CSS var so the layout (and the widget's .tc-content scroll container)
+          // is bounded to the real visible area and infinite-scroll can trigger.
+          var h = tg.viewportStableHeight || tg.viewportHeight;
+          if (h) document.documentElement.style.setProperty("--tg-viewport-height", h + "px");
+        }
         function applySafeAreaInsets() {
           // In fullscreen mode both objects are non-zero: safeAreaInset covers the
           // device notch/home-bar, contentSafeAreaInset covers TG UI overlays
@@ -79,14 +89,18 @@
         if (v("7.7") && typeof tg.requestFullscreen === "function") {
           try { tg.requestFullscreen(); } catch (e) { /* unsupported in this host */ }
         }
+        applyViewportHeight();
         applySafeAreaInsets();
         if (typeof tg.onEvent === "function") {
           tg.onEvent("safeAreaChanged", applySafeAreaInsets);
           tg.onEvent("contentSafeAreaChanged", applySafeAreaInsets);
           tg.onEvent("fullscreenChanged", applySafeAreaInsets);
+          tg.onEvent("fullscreenChanged", applyViewportHeight);
           // Re-apply on collapse/expand: viewportChanged fires when the Mini App
-          // is minimised or restored, at which point safe-area values can shift.
+          // is minimised or restored, at which point safe-area values and the
+          // visible viewport height can both shift.
           tg.onEvent("viewportChanged", applySafeAreaInsets);
+          tg.onEvent("viewportChanged", applyViewportHeight);
         }
       })();
       const widget = new window.ToncastWidget.ToncastWidget({
