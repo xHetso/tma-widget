@@ -3,18 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>TMA test</title>
+    <title>MY APP</title>
     <link rel="stylesheet" href="index.iife.css" data-toncast-widget-css />
     <style>
       /* Minimal shell: fill viewport; widget is the only flex child and grows. */
       html {
-        /* In Telegram's Android WebView 100vh/100dvh are unreliable (they don't
-           match the actually-visible WebView, especially in fullscreen). Drive
-           the layout height from tg.viewportStableHeight via --tg-viewport-height
-           instead; fall back to 100dvh for plain web where dvh is accurate. */
-        height: var(--tg-viewport-height, 100dvh);
-        color-scheme: dark;
-        background: #0f172a;
+        height: 100%;
+        min-height: 100vh;
+        min-height: 100dvh;
+        color-scheme: light;
+        background: #f8fafc;
         /* Prevent the WebView itself from bouncing/elastic-scrolling when the
            user swipes on non-scrollable areas (header, nav bar). Scrolling
            within .tc-content is unaffected — it has overscroll-behavior:contain. */
@@ -23,7 +21,7 @@
       body {
         margin: 0;
         box-sizing: border-box;
-        height: var(--tg-viewport-height, 100dvh);
+        height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
         padding:
@@ -33,7 +31,7 @@
         max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px));
         display: flex;
         flex-direction: column;
-        background: #0f172a;
+        background: #f8fafc;
       }
       #toncast-widget {
         flex: 1 1 auto;
@@ -44,80 +42,6 @@
         --tc-content-padding: 0;
       }
     </style>
-
-    <!-- TEMP debug instrumentation. Remove once the Android pagination issue is
-         diagnosed. Set DEBUG=false to silence without deleting. Patches fetch
-         BEFORE the widget bundle loads so every /v1/paris request is visible in
-         the console (eruda on device), and reports whether .tc-content actually
-         scrolls and emits scroll events — i.e. whether loadMore can ever fire. -->
-    <script>
-      (function tcDebug() {
-        var DEBUG = true;
-        if (!DEBUG) return;
-        var t0 = Date.now();
-        function ts() { return ((Date.now() - t0) / 1000).toFixed(2) + "s"; }
-        var origFetch = window.fetch;
-        window.fetch = function (input, init) {
-          var url = typeof input === "string" ? input : input && input.url;
-          var watch = url && url.indexOf("/v1/paris") !== -1;
-          if (watch) console.log("[TC fetch ->]", ts(), (init && init.method) || "GET", url);
-          return origFetch.apply(this, arguments).then(function (res) {
-            if (watch) console.log("[TC fetch <-]", ts(), res.status, res.type, url);
-            return res;
-          }).catch(function (err) {
-            if (watch) console.log("[TC fetch x]", ts(), String(err), url);
-            throw err;
-          });
-        };
-        // Wrap IntersectionObserver so we can see whether the widget's loadMore
-        // observer is ever created and whether its callback fires on Android.
-        // Suspected culprit: .tc-content { container-type: inline-size } breaking
-        // IO with an element root in this WebView's Chromium.
-        var OrigIO = window.IntersectionObserver;
-        if (OrigIO) {
-          window.IntersectionObserver = function (cb, opts) {
-            var rootIsEl = !!(opts && opts.root && opts.root.nodeType === 1);
-            var rm = opts && opts.rootMargin;
-            console.log("[TC IO new]", "rootIsEl=", rootIsEl, "rootClass=",
-              rootIsEl ? opts.root.className : String(opts && opts.root),
-              "rootMargin=", rm);
-            var wrapped = function (entries, observer) {
-              for (var i = 0; i < entries.length; i++) {
-                var e = entries[i];
-                console.log("[TC IO fire]", "rootMargin=", rm,
-                  "intersecting=", e.isIntersecting,
-                  "ratio=", e.intersectionRatio.toFixed(2));
-              }
-              return cb(entries, observer);
-            };
-            return new OrigIO(wrapped, opts);
-          };
-          window.IntersectionObserver.prototype = OrigIO.prototype;
-        }
-        // Once the widget has mounted its scroll container, report its geometry
-        // and log scroll activity so we can see if the user can reach the bottom.
-        var tries = 0;
-        var iv = setInterval(function () {
-          var c = document.querySelector(".tc-content");
-          if (c) {
-            clearInterval(iv);
-            console.log("[TC content]", "clientH=", c.clientHeight, "scrollH=", c.scrollHeight,
-              "scrollable=", c.scrollHeight > c.clientHeight,
-              "viewportStableH=", window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.viewportStableHeight);
-            var last = -1;
-            c.addEventListener("scroll", function () {
-              if (Math.abs(c.scrollTop - last) < 40) return;
-              last = c.scrollTop;
-              console.log("[TC scroll]", "top=", Math.round(c.scrollTop),
-                "fromBottom=", Math.round(c.scrollHeight - c.scrollTop - c.clientHeight));
-            }, { passive: true });
-          } else if (++tries > 100) {
-            clearInterval(iv);
-            console.log("[TC content] .tc-content never appeared");
-          }
-        }, 200);
-      })();
-    </script>
   </head>
   <body>
     <div id="toncast-widget"></div>
@@ -128,14 +52,6 @@
       (function initToncastTelegramHost() {
         var tg = window.Telegram && window.Telegram.WebApp;
         if (!tg) return;
-        function applyViewportHeight() {
-          // viewportStableHeight = visible WebView height excluding the keyboard;
-          // it is correct on Android where 100vh/100dvh are not. Mirror it into a
-          // CSS var so the layout (and the widget's .tc-content scroll container)
-          // is bounded to the real visible area and infinite-scroll can trigger.
-          var h = tg.viewportStableHeight || tg.viewportHeight;
-          if (h) document.documentElement.style.setProperty("--tg-viewport-height", h + "px");
-        }
         function applySafeAreaInsets() {
           // In fullscreen mode both objects are non-zero: safeAreaInset covers the
           // device notch/home-bar, contentSafeAreaInset covers TG UI overlays
@@ -163,37 +79,35 @@
         if (v("7.7") && typeof tg.requestFullscreen === "function") {
           try { tg.requestFullscreen(); } catch (e) { /* unsupported in this host */ }
         }
-        applyViewportHeight();
         applySafeAreaInsets();
         if (typeof tg.onEvent === "function") {
           tg.onEvent("safeAreaChanged", applySafeAreaInsets);
           tg.onEvent("contentSafeAreaChanged", applySafeAreaInsets);
           tg.onEvent("fullscreenChanged", applySafeAreaInsets);
-          tg.onEvent("fullscreenChanged", applyViewportHeight);
           // Re-apply on collapse/expand: viewportChanged fires when the Mini App
-          // is minimised or restored, at which point safe-area values and the
-          // visible viewport height can both shift.
+          // is minimised or restored, at which point safe-area values can shift.
           tg.onEvent("viewportChanged", applySafeAreaInsets);
-          tg.onEvent("viewportChanged", applyViewportHeight);
         }
       })();
       const widget = new window.ToncastWidget.ToncastWidget({
             "tonconnect": {
                   "type": "standalone",
                   "options": {
-                        "domain": "https://polienko.github.io/test-tma-widget"
+                        "domain": "https://tma-widget.vercel.app"
                   }
             },
             "widget": {
-                  "language": "ru",
-                  "theme": "dark",
                   "layout": {
                         "grid": {
-                              "mobile": 3,
-                              "tablet": 5,
-                              "desktop": 6
+                              "mobile": 1,
+                              "tablet": 2,
+                              "desktop": 3
                         }
                   }
+            },
+            "client": {
+                  "type": "standalone",
+                  "baseUrl": "https://tma-widget.vercel.app"
             }
       });
       widget.mount(document.getElementById('toncast-widget'));
