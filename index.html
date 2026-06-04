@@ -69,6 +69,31 @@
             throw err;
           });
         };
+        // Wrap IntersectionObserver so we can see whether the widget's loadMore
+        // observer is ever created and whether its callback fires on Android.
+        // Suspected culprit: .tc-content { container-type: inline-size } breaking
+        // IO with an element root in this WebView's Chromium.
+        var OrigIO = window.IntersectionObserver;
+        if (OrigIO) {
+          window.IntersectionObserver = function (cb, opts) {
+            var rootIsEl = !!(opts && opts.root && opts.root.nodeType === 1);
+            var rm = opts && opts.rootMargin;
+            console.log("[TC IO new]", "rootIsEl=", rootIsEl, "rootClass=",
+              rootIsEl ? opts.root.className : String(opts && opts.root),
+              "rootMargin=", rm);
+            var wrapped = function (entries, observer) {
+              for (var i = 0; i < entries.length; i++) {
+                var e = entries[i];
+                console.log("[TC IO fire]", "rootMargin=", rm,
+                  "intersecting=", e.isIntersecting,
+                  "ratio=", e.intersectionRatio.toFixed(2));
+              }
+              return cb(entries, observer);
+            };
+            return new OrigIO(wrapped, opts);
+          };
+          window.IntersectionObserver.prototype = OrigIO.prototype;
+        }
         // Once the widget has mounted its scroll container, report its geometry
         // and log scroll activity so we can see if the user can reach the bottom.
         var tries = 0;
